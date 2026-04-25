@@ -3,7 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import type { RequestHandler } from 'http-proxy-middleware';
 import type { IncomingMessage, ServerResponse } from 'http';
-import { RouteConfig } from '../config/gateway.config';
+
+export interface RouteConfig {
+  prefix: string;
+  target: string;
+  public?: boolean;
+}
 
 @Injectable()
 export class ProxyService {
@@ -14,7 +19,8 @@ export class ProxyService {
   >();
 
   constructor(private readonly config: ConfigService) {
-    this.routes = this.config.get<RouteConfig[]>('gatewayRoutes') ?? [];
+    const raw = this.config.getOrThrow<string>('GATEWAY_ROUTES');
+    this.routes = JSON.parse(raw) as RouteConfig[];
   }
 
   getMiddleware(path: string): RequestHandler<IncomingMessage, ServerResponse> {
@@ -29,6 +35,9 @@ export class ProxyService {
           changeOrigin: true,
           pathRewrite: { [`^${route.prefix}`]: '' },
           on: {
+            proxyReq: (proxyReq) => {
+              proxyReq.removeHeader('authorization');
+            },
             error: (_err, _req, res) => {
               const serverRes = res as ServerResponse;
               if (!serverRes.headersSent) {
