@@ -1,20 +1,25 @@
 import { Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
+import type { Request } from 'express';
+
+interface AuthedRequest extends Request {
+  user?: { sub: string };
+}
 
 @Injectable()
 export class ThrottlerBehindProxyGuard extends ThrottlerGuard {
-  protected async getTracker(req: Record<string, any>): Promise<string> {
-    const userId = req.user?.sub as string | undefined;
-    if (userId) return `user:${userId}`;
+  protected getTracker(req: Record<string, unknown>): Promise<string> {
+    const typed = req as unknown as AuthedRequest;
+    const userId = typed.user?.sub;
+    if (userId) return Promise.resolve(`user:${userId}`);
 
-    const forwarded = req.headers?.['x-forwarded-for'] as string | string[] | undefined;
-    const ip =
-      Array.isArray(forwarded)
-        ? forwarded[0]
-        : typeof forwarded === 'string'
-          ? forwarded.split(',')[0].trim()
-          : (req.ip as string | undefined) ?? 'unknown';
+    const forwarded = typed.headers['x-forwarded-for'];
+    const ip = Array.isArray(forwarded)
+      ? forwarded[0]
+      : typeof forwarded === 'string'
+        ? forwarded.split(',')[0].trim()
+        : (typed.ip ?? 'unknown');
 
-    return `ip:${ip}`;
+    return Promise.resolve(`ip:${ip}`);
   }
 }
