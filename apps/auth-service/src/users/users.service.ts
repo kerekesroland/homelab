@@ -14,6 +14,7 @@ export class UsersService {
       .from(users)
       .where(eq(users.email, email))
       .limit(1);
+
     return result[0] ?? null;
   }
 
@@ -22,6 +23,7 @@ export class UsersService {
       .insert(users)
       .values({ email, password: hashedPassword })
       .returning();
+
     return result[0];
   }
 }
