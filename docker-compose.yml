@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: homelab_auth
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth-service:
+    build:
+      context: .
+      args:
+        SERVICE: auth-service
+    environment:
+      PORT: 3002
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRY: 15m
+      REFRESH_TOKEN_EXPIRY_DAYS: 7
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: homelab_auth
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  user-service:
+    build:
+      context: .
+      args:
+        SERVICE: user-service
+    environment:
+      PORT: 3001
+
+  gateway:
+    build:
+      context: .
+      args:
+        SERVICE: gateway
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET}
+      GATEWAY_ROUTES: "[{\"prefix\":\"/auth\",\"target\":\"http://auth-service:3002\",\
+        \"public\":true},{\"prefix\":\"/users\",\"target\":\"http://user-servic\
+        e:3001\"}]"
+    depends_on:
+      - auth-service
+      - user-service
+
+volumes:
+  postgres_data:
