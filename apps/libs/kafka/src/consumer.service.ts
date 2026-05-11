@@ -19,7 +19,7 @@ export class ConsumerService implements OnModuleInit, OnApplicationShutdown {
 
   constructor(@Inject('KAFKA_GROUP_ID') private readonly groupId: string) {
     this.kafka = new Kafka({
-      brokers: ['localhost:9092'],
+      brokers: (process.env.KAFKA_BROKERS ?? 'localhost:9092').split(','),
     });
     this.consumer = this.kafka.consumer({ groupId: this.groupId });
   }

@@ -1,25 +1,58 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
       POSTGRES_DB: homelab_auth
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - homelab
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - homelab
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - homelab
 
   auth-service:
     build:
       context: .
       args:
         SERVICE: auth-service
+    restart: unless-stopped
     environment:
       PORT: 3002
       JWT_SECRET: ${JWT_SECRET}
@@ -27,20 +60,32 @@ services:
       REFRESH_TOKEN_EXPIRY_DAYS: 7
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
       DB_NAME: homelab_auth
+      KAFKA_BROKERS: kafka:9092
     depends_on:
       postgres:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - homelab
 
   user-service:
     build:
       context: .
       args:
         SERVICE: user-service
+    restart: unless-stopped
     environment:
       PORT: 3001
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - homelab
 
   gateway:
     build:
@@ -49,15 +94,35 @@ services:
         SERVICE: gateway
     ports:
       - "3000:3000"
+    restart: unless-stopped
     environment:
       PORT: 3000
       JWT_SECRET: ${JWT_SECRET}
-      GATEWAY_ROUTES: "[{\"prefix\":\"/auth\",\"target\":\"http://auth-service:3002\",\
-        \"public\":true},{\"prefix\":\"/users\",\"target\":\"http://user-servic\
-        e:3001\"}]"
+      GATEWAY_ROUTES: >-
+        [{"prefix":"/auth","target":"http://auth-service:3002","public":true},{"prefix":"/users","target":"http://user-service:3001"}]
     depends_on:
       - auth-service
       - user-service
+    networks:
+      - homelab
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - homelab
 
 volumes:
   postgres_data:
+
+networks:
+  homelab:
+    driver: bridge
